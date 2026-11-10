@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Northbridge Finance — Borrower portal</title>
+  <link rel="stylesheet" href="/styles.css?v=card-hover-20261109">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Northbridge home">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 19V5l14 14V5"/></svg></span>
+      <span class="brand-name">Northbridge<em>Borrower portal</em></span>
+    </a>
+    <div class="topbar-right">
+      <span id="user-chip" class="chip" hidden><i class="dot"></i><span></span></span>
+      <button id="logout-btn" class="btn btn-ghost btn-sm" hidden>Sign out</button>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false" aria-label="Switch to dark mode">
+        <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>
+        <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="portal">
+    <!-- Step 1: register / log in -->
+    <section id="auth" class="auth" hidden>
+      <div class="auth-intro">
+        <span class="eyebrow">Borrower portal</span>
+        <h1>Submit your documents securely</h1>
+        <p class="lead">Create an account, upload your ID card, salary slip and bank statement, and follow the status of each document. Only you and the Northbridge review team can see them.</p>
+      </div>
+      <div class="card auth-card">
+        <div class="auth-tabs" role="tablist">
+          <button role="tab" data-auth="login" aria-selected="true">Sign in</button>
+          <button role="tab" data-auth="register" aria-selected="false">Create account</button>
+        </div>
+        <form id="auth-form" class="auth-form" novalidate>
+          <label class="field-input" id="name-row" hidden>Full name<input name="name" autocomplete="name" maxlength="80"></label>
+          <label class="field-input">Email<input name="email" type="email" autocomplete="email" required maxlength="254"></label>
+          <label class="field-input">Password<input name="password" type="password" autocomplete="current-password" required maxlength="200"><small id="pw-hint" hidden>At least 10 characters.</small></label>
+          <div id="auth-error" class="intake-error" role="alert" hidden></div>
+          <button class="btn btn-primary btn-block" id="auth-submit" type="submit">Sign in</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Steps 2-3: upload form and status -->
+    <section id="dashboard" class="dashboard" hidden>
+      <div class="app-head">
+        <div>
+          <span class="eyebrow">Your application</span>
+          <h1 id="app-ref">—</h1>
+          <p class="muted" id="app-dates"></p>
+        </div>
+        <div class="app-statuses">
+          <div><small>Application</small><span id="app-status" class="status-badge">—</span></div>
+          <div><small>Document check</small><span id="app-check">—</span></div>
+        </div>
+      </div>
+
+      <section class="card pipeline-card" aria-labelledby="pipeline-title">
+        <div class="pipeline-head"><h2 id="pipeline-title">Document processing</h2><span class="muted" id="pipeline-note">Runs automatically after every upload.</span></div>
+        <ol class="stepper" id="pipeline" aria-label="Processing pipeline"></ol>
+      </section>
+      <div id="banner" class="banner" role="status"></div>
+
+      <div class="doc-grid">
+        <section class="card doc-list-card" aria-labelledby="docs-title">
+          <div class="card-head"><h2 id="docs-title">Your documents</h2><span class="muted">PDF, PNG or JPG · 10 MB each</span></div>
+          <section class="upload-panel" aria-label="Upload a document">
+            <span class="upload-label">Document type</span>
+            <div id="upload-types" class="upload-types" role="group" aria-label="Choose document type"></div>
+            <button id="dropzone" class="dropzone" type="button">
+              <span class="dropzone-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v5h14v-5"/></svg></span>
+              <span class="dropzone-copy"><b id="drop-title">Drag and drop your document here</b><span>or <u>browse files</u> · PDF, PNG or JPG</span></span>
+            </button>
+            <p class="upload-help" id="upload-help">Choose a document type, then add its file here. Maximum file size: 10 MB.</p>
+          </section>
+          <div id="doc-list" class="doc-list"></div>
+          <div id="submit-bar" class="submit-bar" hidden></div>
+          <input id="file-input" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" hidden>
+        </section>
+
+        <aside class="side">
+          <section class="card side-card">
+            <h2>What the check means</h2>
+            <ul class="legend" id="legend">
+              <li data-check="Verified"><span class="pill ok">Verified</span>The name on your ID card matches your salary slip.</li>
+              <li data-check="Mismatch"><span class="pill bad">Mismatch</span>The names differ. Our team will review it with you.</li>
+              <li data-check="Incomplete"><span class="pill warn">Incomplete</span>We still need your ID card or your salary slip.</li>
+              <li data-check="Not applicable"><span class="pill">Not applicable</span>Only a bank statement has been uploaded.</li>
+            </ul>
+          </section>
+          <section class="card side-card">
+            <h2>How your files are protected</h2>
+            <ul class="checks">
+              <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Each upload uses a one-time secure link that expires in 10 minutes</li>
+              <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Files are encrypted before they are stored</li>
+              <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>No other customer can ever see your documents</li>
+            </ul>
+          </section>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="confirm-dialog" class="modal" aria-labelledby="confirm-title">
+    <div class="modal-head"><div><h2 id="confirm-title">Upload this file?</h2><p class="muted" id="confirm-meta"></p></div></div>
+    <div class="modal-preview" id="confirm-preview"></div>
+    <p class="small muted modal-note">Check that this is the right document and that every corner is readable. Use synthetic test documents only.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="confirm-cancel" type="button">Cancel</button>
+      <button class="btn btn-outline" id="confirm-other" type="button">Edit file</button>
+      <button class="btn btn-primary" id="confirm-upload" type="button">Upload this file</button>
+    </div>
+  </dialog>
+
+  <dialog id="view-dialog" class="modal modal-wide" aria-labelledby="view-title">
+    <div class="modal-head"><h2 id="view-title">Document</h2><button class="icon-btn" id="view-close" type="button" aria-label="Close">&times;</button></div>
+    <div class="modal-preview tall" id="view-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="view-cancel" type="button">Cancel</button>
+      <button class="btn btn-outline" id="view-edit" type="button">Edit document</button>
+    </div>
+  </dialog>
+
+  <div id="toast" role="status" hidden></div>
+  <script type="module" src="/apply.js?v=doc-actions-20261109"></script>
+</body>
+</html>
