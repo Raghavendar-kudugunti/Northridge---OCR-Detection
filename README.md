@@ -242,7 +242,7 @@ Raw data exists transiently in application memory and in the operator's browser.
 
 ## Supply chain
 
-`pyproject.toml` mirrors `backend/requirements.txt` for [uv](https://docs.astral.sh/uv/) and sets `exclude-newer`, so newly published package versions are not resolved until the cutoff is moved forward deliberately. `uv.lock` was resolved under that cutoff. `uv sync && uv run pytest backend/tests -q` uses it.
+`pyproject.toml` mirrors `backend/requirements.txt` for [uv](https://docs.astral.sh/uv/) and sets `exclude-newer`, so newly published package versions are not resolved until the cutoff is moved forward deliberately. `uv.lock` was resolved under that cutoff. `uv sync & uv run pytest backend/tests -q` uses it.
 
 ## OCR engines
 
