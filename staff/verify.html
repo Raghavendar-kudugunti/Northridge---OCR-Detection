@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d1312" media="(prefers-color-scheme: dark)">
+  <title>Verification — Northbridge lender</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/staff" aria-label="Lender dashboard">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 19V5l14 14V5"/></svg></span>
+      <span class="brand-name">Northbridge<em>Lender · verification</em></span>
+    </a>
+    <div class="topbar-right">
+      <a class="btn btn-ghost btn-sm" href="/staff">Dashboard</a>
+      <span id="mode-chip" class="chip"><i class="dot"></i><span>Synthetic demo</span></span>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false" aria-label="Switch to dark mode" title="Switch to dark mode">
+        <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>
+        <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Landing: page heading, intake card, side column -->
+    <section id="landing" class="landing">
+      <header class="page-head">
+        <span class="eyebrow">KYC document verification</span>
+        <h1>Verify identity and income documents</h1>
+        <p class="lead">Upload an ID card and a salary slip, and a bank statement if you have one. Fields are extracted on this machine, personal data is masked, and names are compared by a fixed, auditable rule.</p>
+      </header>
+
+      <div class="landing-grid">
+      <div class="card intake">
+        <div class="intake-head">
+          <h2>New verification</h2>
+          <span class="intake-sub">Up to 5 files · PDF, PNG, JPG</span>
+        </div>
+        <div class="intake-options">
+          <div class="option">
+            <span class="option-label" id="engine-label">OCR engine</span>
+            <div class="segmented" id="engine-toggle" role="radiogroup" aria-labelledby="engine-label"></div>
+          </div>
+          <div class="option">
+            <span class="option-label">Structuring</span>
+            <div class="static-pill" id="llm-pill">Labeled parser</div>
+          </div>
+        </div>
+
+        <span class="option-label">Documents</span>
+        <div id="slots" class="slots"></div>
+        <input id="file-input" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" hidden>
+        <p class="slot-hint">10 MB each. The name check needs the ID card and the salary slip; every other file is still classified and its fields extracted. Bank statements: page 1 only.</p>
+        <div id="intake-error" class="intake-error" role="alert" hidden></div>
+        <button id="run-btn" class="btn btn-primary btn-block" disabled>Run verification <span aria-hidden="true">→</span></button>
+      </div>
+
+      <aside class="side" aria-label="Samples and data handling">
+        <section class="card side-card">
+          <h2>Try a synthetic set</h2>
+          <p class="side-sub">No real documents needed. Each set shows a different result.</p>
+          <div class="sample-list">
+            <button class="sample" data-sample="full"><span class="sample-text"><b>Full set</b><small>ID card, salary slip and bank statement</small></span><span class="pill ok">Verified</span></button>
+            <button class="sample" data-sample="match"><span class="sample-text"><b>Matching names</b><small>ID card and salary slip, same person</small></span><span class="pill ok">Verified</span></button>
+            <button class="sample" data-sample="mismatch"><span class="sample-text"><b>Name mismatch</b><small>Different names on ID and slip</small></span><span class="pill bad">Mismatch</span></button>
+            <button class="sample" data-sample="incomplete"><span class="sample-text"><b>Missing salary slip</b><small>ID card only</small></span><span class="pill warn">Incomplete</span></button>
+            <button class="sample" data-sample="bank"><span class="sample-text"><b>Bank statement only</b><small>Not part of the name check</small></span><span class="pill">N/A</span></button>
+          </div>
+        </section>
+
+        <section class="card side-card">
+          <h2>How data is handled</h2>
+          <ul class="checks">
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Read on this machine, kept in memory only</li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Names and ID numbers masked before any model</li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Every field links to where it was found</li>
+          </ul>
+          <p class="privacy-note" id="privacy-note">Documents are processed in memory on this machine. Nothing is stored.</p>
+        </section>
+
+        <section id="history" class="card side-card history" hidden></section>
+      </aside>
+      </div>
+    </section>
+
+    <!-- Workspace: progress rail, quality, viewer + inspector -->
+    <section id="workspace" class="workspace" hidden>
+      <div id="review-bar" class="card review-bar" hidden></div>
+      <div class="doc-header">
+        <div class="doc-chips" id="doc-chips" role="tablist" aria-label="Documents"></div>
+        <div class="doc-actions">
+          <button id="export-btn" class="btn btn-ghost" hidden>Export metadata</button>
+          <button id="new-btn" class="btn btn-outline">+ New verification</button>
+        </div>
+      </div>
+
+      <ol class="stepper" id="stepper"></ol>
+
+      <details class="card quality" id="quality">
+        <summary><span class="quality-title">Scan quality</span><span id="quality-badge" class="badge">—</span><svg class="icon chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div id="quality-body" class="quality-body"></div>
+      </details>
+
+      <div class="split">
+        <section class="card viewer" aria-label="Document viewer">
+          <div class="viewer-bar">
+            <span id="viewer-title" class="viewer-title">Document</span>
+            <label class="switch"><input type="checkbox" id="mask-toggle" checked><span class="switch-track"><span class="switch-thumb"></span></span>Mask PII</label>
+          </div>
+          <div id="page-wrap" class="page-wrap"></div>
+          <div id="viewer-hint" class="viewer-hint"></div>
+        </section>
+
+        <section class="card inspector" aria-label="Inspector">
+          <div class="tabs" role="tablist">
+            <button role="tab" data-tab="fields" aria-selected="true">Fields</button>
+            <button role="tab" data-tab="decision" aria-selected="false">Decision</button>
+            <button role="tab" data-tab="masked" aria-selected="false">Masked text</button>
+            <button role="tab" data-tab="compare" aria-selected="false">Compare</button>
+            <button role="tab" data-tab="telemetry" aria-selected="false">Telemetry</button>
+            <button role="tab" data-tab="actions" aria-selected="false" hidden>Actions</button>
+            <button role="tab" data-tab="history" aria-selected="false" hidden>History</button>
+          </div>
+          <div id="panel" class="panel" role="tabpanel"></div>
+        </section>
+      </div>
+      <p class="footnote">The name result is a consistency check between documents. It does not authenticate identity on its own.</p>
+    </section>
+  </main>
+
+  <div id="toast" role="status" hidden></div>
+  <script type="module" src="/staff/assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+services:
+  northbridge:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      NB_DATA_DIR: /app/data
+      # Required: 32 random bytes, base64. Generate with:
+      #   python -c "import base64,secrets;print(base64.b64encode(secrets.token_bytes(32)).decode())"
+      NB_ENCRYPTION_KEY: ${NB_ENCRYPTION_KEY:?Set NB_ENCRYPTION_KEY}
+    volumes:
+      - northbridge-data:/app/data   # encrypted documents + SQLite; the rest of the filesystem stays read-only
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
+    pids_limit: 64
+
+volumes:
+  northbridge-data:

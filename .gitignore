@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+.DS_Store
+node_modules/
+data/
+.claude/
+.openai/
+.test-tmp/
+samples/**/__pycache__/
+evaluation-results.json
+python
