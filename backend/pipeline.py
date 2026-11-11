@@ -39,6 +39,7 @@ DEFAULT_FIELD_MIN = 0.60
 LLM_FACTOR = 0.9       # LLM-sourced values are trusted slightly less than labeled ones.
 UNGROUNDED = 0.5       # A value that cannot be located on the page.
 LABELS = {'full_name': 'Full name', 'date_of_birth': 'Date of birth', 'id_number': 'ID number',
+          'pan_number': 'PAN number',
           'employer_name': 'Employer', 'monthly_salary': 'Gross monthly salary'}
 
 class DocumentError(ValueError):
@@ -241,7 +242,7 @@ def read_document(data, engine='auto', preview_images=False):
             fast_fields = extract_fields(fast_text, fast_type)
             fast_missing = (
                 fast_type == 'Unknown' or
-                (fast_type == 'ID card' and not fast_fields.full_name) or
+                (fast_type == 'ID card' and not fast_fields.full_name and not fast_fields.pan_number) or
                 (fast_type == 'Salary slip' and (not fast_fields.full_name or fast_fields.monthly_salary is None)) or
                 (fast_type == 'Bank statement, page 1' and not fast_fields.full_name)
             )
@@ -279,7 +280,7 @@ def read_document(data, engine='auto', preview_images=False):
         embedded_type = classify(embedded)
         embedded_fields = extract_fields(embedded, embedded_type)
         required_missing = (
-            (embedded_type == 'ID card' and not embedded_fields.full_name) or
+            (embedded_type == 'ID card' and not embedded_fields.full_name and not embedded_fields.pan_number) or
             (embedded_type == 'Salary slip' and (not embedded_fields.full_name or embedded_fields.monthly_salary is None)) or
             (embedded_type == 'Bank statement, page 1' and not embedded_fields.full_name)
         )
@@ -340,15 +341,18 @@ FIELD_LABELS = {
     'full_name': r'full\s*name|employee\s*name|name\s*of\s*(?:the\s*)?(?:employee|card\s*holder|holder)|name|account\s*holder(?:\s*name)?',
     'date_of_birth': r'date\s*of\s*birth|dob|birth\s*date',
     'id_number': r'id\s*(?:number|no\.?)|aadhaa?r\s*(?:number|no\.?)?|pan\s*(?:number|no\.?)?|card\s*(?:number|no\.?)',
+    'employee_id': r'employee\s*(?:id|code|number|no\.?)',
     'employer_name': r'employer(?:\s*name)?|company(?:\s*name)?|organi[sz]ation',
     'monthly_salary': r'gross\s*(?:monthly\s*)?salary|monthly\s*(?:gross\s*)?salary|gross\s*pay|gross\s*earnings|total\s*earnings',
 }
 # Other labels seen on these documents: a line that is one of these is never taken as a value.
-OTHER_LABELS = (r'employee\s*(?:code|id)|designation|department|paid\s*days|earnings|deductions|amount(?:\s*\(rs\.?\))?|'
+OTHER_LABELS = (r'designation|department|paid\s*days|earnings|deductions|amount(?:\s*\(rs\.?\))?|'
                 r'basic\s*pay|net\s*pay|total\s*deductions|mobile|phone|address|gender|sex|issue\s*date|valid\s*(?:until|till)|'
-                r'expiry(?:\s*date)?|ifsc|branch|pay\s*period|period|account\s*(?:number|no\.?|type)|holder\s*signature|signature|'
+                r'expiry(?:\s*date)?|ifsc|branch|payment\s*date|currency|document\s*type|pay\s*period|period|account\s*(?:number|no\.?|type)|holder\s*signature|signature|'
                 r"father'?s?\s*name|mother'?s?\s*name|spouse\s*name|nationality|blood\s*group")
 _ANY_LABEL = re.compile(r'^(?:' + '|'.join(list(FIELD_LABELS.values()) + [OTHER_LABELS]) + r')(?![A-Za-z0-9])\s*[:\-]?\s*$', re.I)
+_NEXT_LABELED_FIELD = re.compile(
+    r'\s+(?=(?:' + '|'.join(list(FIELD_LABELS.values()) + [OTHER_LABELS]) + r')(?![A-Za-z0-9])\s*[:\-])', re.I)
 
 
 def labeled(text, labels, lead_words=0):
@@ -373,6 +377,11 @@ def labeled(text, labels, lead_words=0):
                 value = first
             else:
                 value = ''
+        if value:
+            # PDF text extraction can place adjacent columns on the same line, e.g.
+            # "Employee Name: Tara Bose Payment Date: 31 Oct 2026". Stop the field
+            # value at the next recognized label instead of absorbing that column.
+            value = _NEXT_LABELED_FIELD.split(value, maxsplit=1)[0].strip()
         if value and not _ANY_LABEL.match(value):
             if labels == FIELD_LABELS['full_name']:
                 value = re.split(r'\b\d{1,2}\s+[A-Za-z]{3,9}\s*[-\u2013]\s*\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}\b', value, maxsplit=1, flags=re.I)[0].strip()
@@ -381,6 +390,19 @@ def labeled(text, labels, lead_words=0):
         following = next((l for l in lines[i + 1:i + 4] if l and not _ANY_LABEL.match(l)), None)
         if following:
             return following.split('\t', 1)[0].strip()
+    return None
+
+
+def labeled_column(text, labels):
+    """Read a labeled value that appears in a neighboring PDF table column."""
+    pattern = re.compile(r'(?<![A-Za-z0-9])(?:' + labels + r')(?![A-Za-z0-9])\s*[:\-\u2013]\s*(.*)$', re.I)
+    for line in text.splitlines():
+        match = pattern.search(line)
+        if not match:
+            continue
+        value = _NEXT_LABELED_FIELD.split(match.group(1), maxsplit=1)[0].strip()
+        if value and not _ANY_LABEL.match(value):
+            return value
     return None
 
 
@@ -403,17 +425,75 @@ def salary_credit(text):
 _LEADING_AMOUNT = re.compile(r'(?:INR|Rs\.?|₹)?\s*(\d[\d,]*(?:\.\d{1,2})?)(?:\s*/-)?(?=\s|$)', re.I)
 
 
+def id_card_name(text):
+    """Recover unlabeled names commonly printed as a standalone line on Aadhaar cards."""
+    lines = [line.strip(' \t|:;') for line in text.splitlines()]
+    candidates = []
+    blocked = NOT_NAME_WORDS | {
+        'my', 'male', 'female', 'transgender', 'of', 'the', 'sample', 'synthetic', 'specimen',
+        'test', 'data', 'record', 'fictional', 'valid', 'government', 'india', 'department',
+    }
+    for index, line in enumerate(lines):
+        if not line or len(line) > 64 or re.search(r'\d', line):
+            continue
+        if not re.fullmatch(r"[A-Za-z][A-Za-z.'’\-]*(?:\s+[A-Za-z][A-Za-z.'’\-]*){1,4}", line):
+            continue
+        words = re.findall(r'[A-Za-z]+', line.casefold())
+        if any(word in blocked for word in words):
+            continue
+        context = ' '.join(lines[max(0, index - 1):min(len(lines), index + 4)])
+        score = 0
+        if re.search(r'\b(?:male|female|transgender)\b', context, re.I):
+            score += 2
+        if re.search(r'\b(?:dob|date\s*of\s*birth|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4})\b', context, re.I):
+            score += 2
+        nearby = ' '.join(lines[max(0, index - 3):min(len(lines), index + 5)])
+        if re.search(r'\b(?:aadhaa?r|identity|id\s*(?:number|no\.?))\b', nearby, re.I):
+            score += 1
+        candidates.append((score, index, line))
+    if not candidates:
+        return None
+    # Prefer a candidate with nearby identity details; ties retain document reading order.
+    score, _, name = max(candidates, key=lambda candidate: (candidate[0], -candidate[1]))
+    return name if score >= 2 else None
+
+
+def id_card_number(text):
+    """Recover common Aadhaar/PAN identifiers printed without a text label."""
+    aadhaar = re.search(r'(?<!\d)\d{4}[ -]?\d{4}[ -]?\d{4}(?!\d)', text)
+    if aadhaar:
+        return aadhaar.group(0)
+    pan = re.search(r'(?<![A-Z0-9])[A-Z]{5}\d{4}[A-Z](?![A-Z0-9])', text, re.I)
+    return pan.group(0).upper() if pan else None
+
+
+_PAN_VALUE = re.compile(r'(?<![A-Z0-9])[A-Z]{5}\d{4}[A-Z](?![A-Z0-9])', re.I)
+
+
 def extract_fields(text, doc_type=None):
     salary = labeled(text, FIELD_LABELS['monthly_salary'])
     salary_match = _LEADING_AMOUNT.match(salary or '')
     if salary_match is None:
         # Table rows flattened by the PDF text layer: "Gross Salary 82,000 Total Deductions 9,800".
         salary_match = re.search(r'(?<![A-Za-z])(?:' + FIELD_LABELS['monthly_salary'] + r')\s*[:\-]?\s*(?:INR|Rs\.?|₹)?\s*(\d[\d,]*(?:\.\d{1,2})?)(?![\d,])', text, re.I)
+    full_name = labeled(text, FIELD_LABELS['full_name'])
+    id_number = labeled(text, FIELD_LABELS['id_number'], lead_words=2)
+    pan_match = _PAN_VALUE.search(text)
+    pan_number = pan_match.group(0).upper() if pan_match else None
+    if not full_name and doc_type == 'ID card' and not pan_number:
+        full_name = id_card_name(text)
+    if not id_number and doc_type == 'ID card':
+        id_number = id_card_number(text)
+    if not id_number and pan_number:
+        id_number = pan_number
     return NorthbridgeFields(
-        full_name=labeled(text, FIELD_LABELS['full_name']),
+        full_name=full_name,
         date_of_birth=labeled(text, FIELD_LABELS['date_of_birth']),
-        id_number=labeled(text, FIELD_LABELS['id_number'], lead_words=2),
-        employer_name=labeled(text, FIELD_LABELS['employer_name']),
+        id_number=id_number,
+        pan_number=pan_number,
+        is_pan_card=bool(doc_type == 'ID card' and (pan_number or re.search(r'permanent\s+account\s+number|income\s+tax\s+department', text, re.I))),
+        employee_id=labeled(text, FIELD_LABELS['employee_id']),
+        employer_name=labeled(text, FIELD_LABELS['employer_name']) or labeled_column(text, FIELD_LABELS['employer_name']),
         monthly_salary=(float(salary_match.group(1).replace(',', '')) if salary_match
                         else salary_credit(text) if doc_type == 'Bank statement, page 1' else None))
 
@@ -477,7 +557,8 @@ def redact(text, fields, vault, analyzer):
     spans = [(x.start, x.end, x.entity_type, 1) for x in detected if x.entity_type != 'PERSON']
     spans += [(s, e, k, 1) for s, e, k in ner_person_spans(text, detected)]
     # Explicit labeled field values and private-label values take priority (0) over any detection.
-    for key, kind in [('full_name','PERSON'), ('date_of_birth','DATE_TIME'), ('id_number','ID_NUM'), ('employer_name','ORGANIZATION')]:
+    for key, kind in [('full_name','PERSON'), ('date_of_birth','DATE_TIME'), ('id_number','ID_NUM'), ('pan_number','ID_NUM'),
+                      ('employee_id','EMPLOYEE_ID'), ('employer_name','ORGANIZATION')]:
         value = getattr(fields, key)
         if value:
             spans.extend((m.start(), m.end(), kind, 0) for m in re.finditer(re.escape(value), text, re.I))
@@ -505,6 +586,8 @@ def tokenize_fields(fields, vault):
     token_fields = fields.model_copy()
     if fields.full_name: token_fields.full_name = vault.token('PERSON', fields.full_name)
     if fields.id_number: token_fields.id_number = vault.token('ID_NUM', fields.id_number)
+    if fields.pan_number: token_fields.pan_number = vault.token('ID_NUM', fields.pan_number)
+    if fields.employee_id: token_fields.employee_id = vault.token('EMPLOYEE_ID', fields.employee_id)
     if fields.date_of_birth: token_fields.date_of_birth = vault.token('DATE_TIME', fields.date_of_birth)
     if fields.employer_name: token_fields.employer_name = vault.token('ORGANIZATION', fields.employer_name)
     return token_fields
@@ -658,13 +741,24 @@ def evaluate(items):
         return VerificationCheck(status='Not applicable', reason='Bank statements do not participate in the name comparison.')
     if len(ids) != 1 or len(slips) != 1:
         return VerificationCheck(status='Incomplete', reason='Provide exactly one ID card and one salary slip for an unambiguous comparison.')
-    if not ids[0][1].full_name or not slips[0][1].full_name:
+    id_fields, slip_fields = ids[0][1], slips[0][1]
+    if id_fields.is_pan_card:
+        if not id_fields.pan_number:
+            return VerificationCheck(status='Incomplete', reason='A PAN card was uploaded, but its PAN number could not be read.')
+        if not slip_fields.pan_number:
+            return VerificationCheck(status='Incomplete', reason='The PAN card was read, but a PAN number could not be found on the salary slip.')
+        if id_fields.pan_number != slip_fields.pan_number:
+            return VerificationCheck(status='Mismatch', reason='The PAN number on the PAN card does not match the PAN number on the salary slip.')
+        if id_fields.full_name and slip_fields.full_name and id_fields.full_name != slip_fields.full_name:
+            return VerificationCheck(status='Mismatch', reason='The PAN numbers match, but the names on the PAN card and salary slip differ.')
+        return VerificationCheck(status='Verified', reason='The PAN number matches across the PAN card and salary slip.')
+    if not id_fields.full_name or not slip_fields.full_name:
         return VerificationCheck(status='Incomplete', reason='A required name could not be extracted. Review the document labels and scan quality.')
-    matched = ids[0][1].full_name == slips[0][1].full_name
+    matched = id_fields.full_name == slip_fields.full_name
     return VerificationCheck(status='Verified' if matched else 'Mismatch', reason='Normalized names match across the ID card and salary slip.' if matched else 'The ID card and salary slip contain different names. Manual review is required.')
 
 
-GATED_FIELDS = {'ID card': ('full_name',), 'Salary slip': ('full_name', 'monthly_salary')}
+GATED_FIELDS = {'ID card': ('full_name', 'pan_number'), 'Salary slip': ('full_name', 'monthly_salary', 'pan_number')}
 
 
 def review_gate(check, docs):
@@ -726,7 +820,7 @@ def process(documents, analyzer, llm=None, engine='auto', tolerant=False, previe
             fields = extract_fields(text, doc_type)
             full_page_ocr_used = False
             required_missing = (
-                (doc_type == 'ID card' and not fields.full_name) or
+                (doc_type == 'ID card' and not fields.full_name and not fields.pan_number) or
                 (doc_type == 'Salary slip' and (not fields.full_name or fields.monthly_salary is None)) or
                 (doc_type == 'Bank statement, page 1' and not fields.full_name)
             )

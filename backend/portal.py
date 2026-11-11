@@ -28,7 +28,7 @@ import pymupdf
 from PIL import Image, ImageOps
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from .pipeline import DocumentError, MAX_FILE, process, validate
+from .pipeline import DocumentError, MAX_FILE, normalize_name, process, validate
 from .store import token_hash, verify_password
 
 COOKIE = 'nb_session'
@@ -113,6 +113,43 @@ def current_docs(st, app_id):
     return sorted(rows, key=lambda r: order.index(r['slot']))
 
 
+def identity_candidates_from_documents(documents):
+    """Build keyed-match inputs from parsed identifiers, never from raw document bytes."""
+    candidates = set()
+    for doc in documents:
+        fields = getattr(doc, 'fields', None) or doc.get('fields') or {}
+        get = fields.get if isinstance(fields, dict) else lambda key: getattr(fields, key, None)
+        person = normalize_name(get('full_name') or '')
+        if not person:
+            continue
+        identifier = re.sub(r'[^A-Z0-9]', '', (get('id_number') or '').upper())
+        if identifier:
+            candidates.add(('identity_id', f'{person}|{identifier}'))
+        employee_id = re.sub(r'[^A-Z0-9]', '', (get('employee_id') or '').upper())
+        employer = normalize_name(get('employer_name') or '')
+        # Employee IDs can be reused by unrelated employers; require employer and name context.
+        if employee_id and employer:
+            candidates.add(('employee_id', f'{person}|{employer}|{employee_id}'))
+    return sorted(candidates)
+
+
+def verified_identity_candidates(result):
+    return identity_candidates_from_documents(result.documents)
+
+
+def backfill_verified_identity_keys(st):
+    """Index existing approved, verified applications after deploying the fingerprint table."""
+    rows = st.q("SELECT id, borrower_id, result_blob FROM applications WHERE status='approved' AND check_status='Verified' AND result_blob IS NOT NULL")
+    for row in rows:
+        try:
+            payload = json.loads(st.decrypt(row['result_blob'], f'result:{row["id"]}'))
+            candidates = identity_candidates_from_documents(payload.get('documents', []))
+            st.check_and_register_verified_identity_keys(row['id'], row['borrower_id'], candidates, register=True)
+        except Exception:
+            # A legacy result that cannot be decrypted or decoded is left out of the index.
+            continue
+
+
 def decided(app_row):
     return app_row['status'] in ('approved', 'rejected')
 
@@ -135,16 +172,20 @@ def promote_verified_applications(st):
                    (reason, now, row['id']))
             st.audit('application.auto_approved', None, row['id'],
                      detail=json.dumps({'check_status': 'Verified', 'migrated_existing_check': True}))
+        backfill_verified_identity_keys(st)
 
 
 def can_upload(app_row, doc, slot=None):
-    """Allow first uploads in draft, missing required slots, or explicit re-upload requests."""
+    """Allow draft/re-upload changes and let borrowers correct name mismatches immediately."""
+    mismatch_slot = app_row['check_status'] == 'Mismatch' and slot in ('id', 'slip')
     if app_row['status'] == 'draft':
         return True
     if app_row['status'] == 'action_needed':
-        return (doc is None and slot in REQUIRED) or (doc is not None and doc['status'] == 'reupload')
+        return ((doc is None and slot in REQUIRED) or (doc is not None and doc['status'] == 'reupload')
+                or mismatch_slot)
     if app_row['status'] == 'in_review':
-        return doc is not None and doc['status'] == 'reupload'
+        return (doc is not None and doc['status'] == 'reupload') or (
+            mismatch_slot)
     return False
 
 
@@ -188,7 +229,14 @@ def doc_outcome(slot, result_doc):
         what = 'a document we could not recognise' if detected == 'Unknown' else with_article(doc_noun(detected))
         wanted = doc_noun(spec['title'])
         return 'reupload', detected, f'This looks like {what}, not {with_article(wanted)}. Please upload your {wanted} here.'
-    missing = [FIELD_WORDS[f] for f in spec['fields'] if getattr(result_doc.fields, f) is None]
+    if slot == 'id' and result_doc.fields.is_pan_card and not result_doc.fields.pan_number:
+        return 'reupload', detected, 'We could not read the PAN number on this card. Upload a clearer PAN card image.'
+    required_fields = spec['fields']
+    if slot == 'id' and result_doc.fields.is_pan_card and result_doc.fields.pan_number:
+        # A PAN number provides a reliable link to the matching number on the payslip,
+        # even when OCR cannot recover the PAN card's printed name line.
+        required_fields = [field for field in required_fields if field != 'full_name']
+    missing = [FIELD_WORDS[f] for f in required_fields if getattr(result_doc.fields, f) is None]
     if missing:
         return 'reupload', detected, f'We could not find {" or ".join(missing)} on this document. Please upload a clearer or complete copy.'
     return 'accepted', detected, None
@@ -222,6 +270,14 @@ def run_check(st, app_id, analyzer, llm):
                 continue  # A lender's re-upload request stands until the borrower uploads a new version.
             status, detected, reason = doc_outcome(d['slot'], r)
             st.run('UPDATE documents SET status=?, detected_type=?, reason=? WHERE id=?', (status, detected, reason, d['id']))
+        pan_card_present = any(r.document_type == 'ID card' and r.fields.is_pan_card for r in result.documents)
+        if pan_card_present:
+            slip_doc = next((d for d, r in zip(docs, result.documents) if d['slot'] == 'slip' and not r.error), None)
+            if slip_doc:
+                slip_result = next(r for d, r in zip(docs, result.documents) if d['id'] == slip_doc['id'])
+                if not slip_result.fields.pan_number:
+                    st.run('UPDATE documents SET status=?, reason=? WHERE id=?',
+                           ('reupload', 'We could not find a PAN number on this salary slip. Upload a copy that shows the PAN number.', slip_doc['id']))
         docs = current_docs(st, app_id)
         slots = {d['slot'] for d in docs}
         check = result.check
@@ -244,6 +300,32 @@ def run_check(st, app_id, analyzer, llm):
             for stage in result.stages:
                 if stage.get('key') == 'verify':
                     stage.update(status='warn', detail='Verified · LLM-supplied name needs confirmation')
+        identity_candidates = verified_identity_candidates(result)
+        eligible_for_registration = (
+            check.status == 'Verified' and not llm_name_used
+            and not any(d['status'] == 'reupload' for d in docs)
+            and set(REQUIRED) <= slots
+        )
+        reused = st.check_and_register_verified_identity_keys(
+            app_id, app_row['borrower_id'], identity_candidates,
+            register=eligible_for_registration)
+        if reused:
+            if 'identity_id' in reused:
+                reason = ('Not applicable: an identity number and name on these documents match a document '
+                          'already used on a verified account. If this is your document, contact support.')
+            else:
+                reason = ('Not applicable: this employee ID, employer and name match a payslip already used '
+                          'on a verified account. If this is your document, contact support.')
+            check = check.model_copy(update={
+                'status': 'Not applicable', 'reason': reason, 'review_required': True,
+                'review_reasons': [reason],
+            })
+            result.check = check
+            for doc in result.documents:
+                doc.check = check
+            for stage in result.stages:
+                if stage.get('key') == 'verify':
+                    stage.update(status='warn', detail='Not applicable Â· verified identity match found')
         if any(d['status'] == 'reupload' for d in docs) or not set(REQUIRED) <= slots:
             status = 'action_needed'
         elif check.status == 'Verified' and not llm_name_used:
@@ -347,6 +429,22 @@ def borrower_view(st, app_row):
             },
         })
     show_check = app_row['check_status'] and app_row['status'] not in ('checking', 'draft')
+    check_reason = app_row['check_reason']
+    if (show_check and app_row['check_status'] == 'Mismatch' and app_row['result_blob']
+            and not (check_reason or '').startswith('The PAN number')):
+        # Keep extracted names inside encrypted result storage; construct this detail only
+        # for the authenticated borrower's response instead of persisting names in plaintext.
+        try:
+            result = json.loads(st.decrypt(app_row['result_blob'], f'result:{app_row["id"]}'))
+            names = {
+                doc.get('document_type'): (doc.get('fields') or {}).get('full_name')
+                for doc in result.get('documents', [])
+            }
+            id_name, slip_name = names.get('ID card'), names.get('Salary slip')
+            if id_name and slip_name:
+                check_reason = f'The ID card shows "{id_name}", while the salary slip shows "{slip_name}".'
+        except (TypeError, ValueError, KeyError):
+            pass
     can_submit, submit_hint = submit_state(app_row, list(docs.values()))
     pipeline = [{k: stage[k] for k in ('key', 'label', 'status', 'detail')}
                 for stage in json.loads(app_row['stages'] or '[]')]
@@ -357,7 +455,7 @@ def borrower_view(st, app_row):
     return {
         'can_submit': can_submit, 'submit_hint': submit_hint, 'resubmit': bool(app_row['submitted']),
         'ref': app_row['ref'], 'status': app_row['status'], 'status_label': STATUS_LABELS[app_row['status']],
-        'check': {'status': app_row['check_status'], 'reason': app_row['check_reason']} if show_check else None,
+        'check': {'status': app_row['check_status'], 'reason': check_reason} if show_check else None,
         'decision_reason': app_row['decision_reason'] if decided(app_row) else None,
         'created': app_row['created'], 'updated': app_row['updated'], 'slots': slots,
         'pipeline': pipeline,
@@ -621,6 +719,13 @@ def decide(app_id: int, body: Decision, request: Request, user=Depends(lender)):
         raise HTTPException(409, 'Only applications under review can be decided.')
     if body.decision == 'reject' and not body.reason.strip():
         raise HTTPException(422, 'Give the borrower a reason for the rejection.')
+    if body.decision == 'approve' and row['check_status'] == 'Verified' and row['result_blob']:
+        payload = json.loads(st.decrypt(row['result_blob'], f'result:{app_id}'))
+        candidates = identity_candidates_from_documents(payload.get('documents', []))
+        reused = st.check_and_register_verified_identity_keys(
+            app_id, row['borrower_id'], candidates, register=True)
+        if reused:
+            raise HTTPException(409, 'A matching verified identity is already registered. Review this application before approving it.')
     status = 'approved' if body.decision == 'approve' else 'rejected'
     st.run('UPDATE applications SET status=?, decision_reason=?, updated=? WHERE id=?', (status, body.reason.strip() or None, time.time(), app_id))
     st.audit(f'application.{status}', user['id'], app_id, detail=json.dumps({'check_status': row['check_status'], 'review_required': bool(row['review_required'])}))

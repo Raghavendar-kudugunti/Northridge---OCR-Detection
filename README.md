@@ -2,33 +2,36 @@
 
 Team Beta · Runnable local MVP + private, browser-only synthetic demonstration.
 
-## Start on your Mac
+## Local setup and workflow
 
-Python 3.12 is required. PyMuPDF reads embedded text from digital PDFs first; Docling and its layout models are used only when the text layer is insufficient. RapidOCR handles image uploads, and Tesseract is optional (OCR fallback). From the extracted project folder:
+Python 3.12 is required. The steps below use Windows PowerShell; run them from the repository folder. PyMuPDF reads digital PDF text, Docling handles layout fallback, and RapidOCR processes scans and images. Tesseract is optional.
 
-```bash
-brew install tesseract   # optional: enables the Tesseract engine and the Compare tab
-python3.12 -m venv .venv
-source .venv/bin/activate
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install -r backend/requirements.txt
+python -m backend.seed
 python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
-Seed a development lender account and four synthetic borrowers, then open **http://127.0.0.1:8000**:
+Open **http://127.0.0.1:8000** for the borrower portal. The staff dashboard is **http://127.0.0.1:8000/staff**. Seeded local demo credentials and the four synthetic borrower accounts are listed in `backend/seed.py`; override the defaults with `NB_SEED_LENDER_EMAIL`, `NB_SEED_LENDER_PASSWORD`, and `NB_SEED_BORROWER_PASSWORD`. Seed only once for a fresh local database. Press **Ctrl+C** in the server terminal to stop the app; restart with the uvicorn command after changing backend code.
 
-```bash
-python -m backend.seed
-```
+macOS/Linux: create and activate `.venv` with the platform's normal Python 3.12 commands, then run the same `python -m pip`, `python -m backend.seed`, and `python -m uvicorn` commands. Alternatively, with Docker Desktop, run `docker compose up --build`; configure the required `NB_ENCRYPTION_KEY` first.
 
-The site root `/` is the **borrower portal** only. Staff use the **staff dashboard** at `/staff` — it is not linked from any borrower page and its files are served from the separate `staff/` folder. Development credentials are defined in `backend/seed.py` (override them with the `NB_SEED_*` variables). See *Borrower portal and staff dashboard* below.
+### Borrower verification
 
-Alternative (Docker Desktop):
+1. Register or sign in at `/`, then upload an ID card and salary slip. A PAN card is supported as the ID document; a bank statement and up to two other documents are optional.
+2. Submit the application. The app extracts text locally, checks that each file matches its selected document type, and reports specific missing-field or comparison reasons. If asked to replace a document, use the reason shown beside it, upload a corrected file, and resubmit.
+3. A regular ID card is checked by comparing its holder name with the employee name on the salary slip. For a PAN card, the PAN number must also be present on the salary slip and match the PAN card. Missing values produce **Incomplete**; differing values produce **Mismatch**.
+4. Complete, matching documents can be approved automatically. A mismatch, incomplete extraction, or duplicate verified identity is flagged for staff review. A verified identity value already associated with another borrower is marked **Not applicable** with a notice to the new applicant.
 
-```bash
-docker compose up --build
-```
+### Staff review
 
-The container binds only to localhost. Docker configuration is supplied but was not built in the authoring environment. Python installation and processing were tested on Linux/Python 3.12; Intel macOS installation is not verified.
+1. Open `/staff` and sign in with the seeded lender account (role `lender`).
+2. Use the queue to find an application and open it to inspect its check result, reason, extracted fields, document versions, and audit history.
+3. Resolve cases needing staff attention: request a replacement with a clear reason, add an internal note, then approve or reject when appropriate.
+
+The development seed credentials are for local synthetic data only. Do not expose this local-only service to the public internet or use real identity documents without a reviewed deployment and data-retention policy.
 
 ## Backend processing pipeline
 
@@ -42,9 +45,9 @@ Every upload runs the same five stages over the application's current documents.
 | **OCR** | Local RapidOCR (or Tesseract) reads image uploads; unreadable files fail closed → re-upload prompt | `ocr.py` |
 | **PII masking** | Presidio with spaCy NER (`en_core_web_sm`, local) plus Indian ID/phone/account patterns and labeled values. Names, IDs, dates of birth, addresses, phones, account numbers and relatives' names become request-scoped tokens such as `<PERSON_1>` | `pipeline.redact` |
 | **LLM evaluation** | When configured and supported fields are missing, DeepSeek V4.1 Flash (OpenRouter, provider data collection denied) or the configured local model reads **masked text only** and may fill parser gaps. Placeholder guardrails discard raw names or foreign tokens; the stage reports failures and empty/rejected output. Skipped when no supported fields are missing or no LLM is configured. | `llm.py`, `pipeline.apply_llm` |
-| **Verification** | Deterministic: normalized ID-card name token vs salary-slip name token → Verified / Mismatch / Incomplete / Not applicable, plus human-review gates. Request token maps are cleared; only sanitized events (counts, timings, statuses) are logged | `pipeline.evaluate`, `review_gate` |
+| **Verification** | Deterministic: compare ID-card holder name with salary-slip employee name; for PAN cards, also require a matching PAN number on the payslip. Missing or conflicting values become Incomplete or Mismatch. Previously verified identity identifiers are checked for another borrower and reported as Not applicable. | `pipeline.evaluate`, `review_gate`, `store.py` |
 
-The LLM cannot decide the result: the name comparison is exact equality of tokens, as the specification requires. Because the LLM only sees placeholders, it confirms *which* token is the holder's name on each document; the verification engine compares them.
+The LLM cannot decide the result: the verification rules compare parsed values deterministically. Names are normalized before comparison; PAN numbers are compared when the ID document is a PAN card. Because the LLM only sees placeholders, it can help identify which token represents a field, but the verification engine performs the comparison.
 
 **Real-world layouts.** Labels are read whether written as `Name: value`, `Name value`, or `Name` with the value on the next line (e.g. `Employee Name` ↵ `Ravi Menon`, `Gross Salary` ↵ `82,000`). Documents are classified by weighted signals (e.g. *payslip*, *gross salary*, *net pay* → salary slip; *statement of … bank*, *opening balance*, *IFSC* → bank statement; *ID number*, *date of birth*, *government* → ID card), so cards that never print "Identity card" or "Aadhaar" are still recognised.
 
@@ -74,9 +77,9 @@ Status: Verified · Mismatch · Incomplete ·       History: every document vers
 
 **Borrower flow.** Uploading only stores the file (encrypted) — nothing is verified yet. Choosing a file first opens a **preview** ("Upload this file" / "Choose another file"); after upload each document shows its filename and a page-1 **thumbnail** that opens a larger view. Before submitting, the borrower can **replace** or **remove** any document. **Submit for verification** runs the full pipeline once on all documents. Before a final staff decision, the borrower can replace any current document and **resubmit**; replacing a document while under review moves the application to **Action needed**.
 
-**Application statuses:** Not submitted → Checking your documents → Action needed (replace flagged documents, then resubmit), Approved (all required documents accepted and the name check is Verified using parser/OCR values), or Under review (Mismatch/Incomplete or an LLM-supplied matching name) → Approved / Not approved by staff. A model-supplied name is never enough to auto-approve.
+**Application statuses:** Not submitted → Checking your documents → Action needed (replace flagged documents, then resubmit), Approved (required documents accepted and deterministic checks pass), or Under review (Mismatch, Incomplete, duplicate verified identity, or an LLM-supplied matching name) → Approved / Not approved by staff. A model-supplied name is never enough to auto-approve.
 
-**Automatic re-upload prompts** (per document, shown to the borrower with a plain reason): the file cannot be read; its content is a different document type than its slot (e.g. a salary slip in the ID card slot); a required field is missing (name on the ID card; name and gross salary on the salary slip; account holder on the bank statement). A lender can also request a re-upload with a reason. Re-uploading creates a new version; older versions are kept for the audit trail.
+**Automatic re-upload prompts** (per document, shown to the borrower with a plain reason): the file cannot be read; its content is a different document type than its slot (e.g. a salary slip in the ID card slot); or a required field is missing (name on the ID card; name and gross salary on the salary slip; PAN number on a PAN-card applicant's salary slip; account holder on the bank statement). A lender can also request a re-upload with a reason. Re-uploading creates a new version; older versions are kept for the audit trail.
 
 **Isolation and security**
 
@@ -117,7 +120,8 @@ Status: Verified · Mismatch · Incomplete ·       History: every document vers
 - Pillow/OpenCV sharpness, brightness and contrast checks; image orientation corrected using EXIF; bounded 20 MP image input and 2400-pixel PDF renders.
 - Microsoft Presidio analyzer/anonymizer with explicit Indian financial recognizers and labeled-field spans. Blank spaCy tokenization avoids runtime model downloads.
 - Name normalization per the spec: NFKC, **uppercase, strip punctuation, collapse spaces** (`Ravi Menon.` = `RAVI  MENON`). Request-local PERSON tokens built on that key are shared across files, so the ID and slip are compared without sending raw names. Maps clear in `finally` even on failures.
-- Exact token comparison: Verified / Mismatch / Incomplete / Not applicable. Missing names or duplicate ID/salary files cannot verify. Bank statements and other documents are extracted and shown but never change the name result.
+- Deterministic name comparison for ID card and salary slip; PAN cards additionally require matching PAN numbers on the card and payslip. Missing required values result in Incomplete; conflicts result in Mismatch. Bank statements and other documents do not change the identity comparison.
+- After an application is verified, keyed fingerprints of supported identity values are retained for cross-borrower duplicate detection. If another borrower submits the same identifying value, the check reports Not applicable for staff review. Raw identifiers are not stored in the fingerprint index.
 - Per-field evidence: every field carries `confidence` (OCR word confidence × source factor), `source` (`labeled_parser` / `llm`), and page `boxes`. In the UI, select a field to highlight where it came from (PDF page 1 is rendered for this).
 - Check diagnostics: name confidence below 0.85, salary confidence below 0.90 (plan §2.2), a value not found on the page, a low-quality OCR scan, an LLM guardrail rejection or a parser/LLM disagreement is recorded in `check.review_required` and non-PII `review_reasons`. The lender portal auto-approves complete applications with a Verified parser/OCR name match; Mismatch, Incomplete and LLM-supplied name matches stay in review.
 - Optional LLM extraction on masked text only (off by default; see below). Code wins: the labeled parser's values are never replaced, and the LLM cannot change the name result.

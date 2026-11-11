@@ -4,12 +4,16 @@ from pydantic import BaseModel, ConfigDict, Field
 DocumentType = Literal['ID card', 'Salary slip', 'Bank statement, page 1', 'Unknown']
 Status = Literal['Verified', 'Mismatch', 'Incomplete', 'Not applicable']
 FieldSource = Literal['labeled_parser', 'llm', 'none']
-FIELD_NAMES = ('full_name', 'date_of_birth', 'id_number', 'employer_name', 'monthly_salary')
+FIELD_NAMES = ('full_name', 'date_of_birth', 'id_number', 'pan_number', 'employer_name', 'monthly_salary')
 
 class NorthbridgeFields(BaseModel):
     full_name: str | None = None
     date_of_birth: str | None = None
     id_number: str | None = None
+    pan_number: str | None = None
+    is_pan_card: bool = False
+    # Parsed from salary slips for reuse checks; never asked from the LLM.
+    employee_id: str | None = None
     employer_name: str | None = None
     monthly_salary: float | None = Field(default=None, ge=0)
 

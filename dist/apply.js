@@ -84,14 +84,22 @@ function banner(app) {
   const reupload = app.slots.filter(s => s.document?.status === 'reupload').length;
   const missing = app.slots.filter(s => s.missing).length;
   const attention = reupload + missing;
+  const mismatch = app.check?.status === 'Mismatch';
+  const duplicate = app.check?.status === 'Not applicable';
   const messages = {
     draft: ['', 'upload', 'Upload your documents and check each preview. When everything is right, submit for verification.'],
     checking: ['info', 'clock', 'Your documents are being processed locally. The elapsed time shows how long this run has been in progress.'],
     action_needed: attention
-      ? ['warn', 'alert', `${attention} document${attention === 1 ? ' needs' : 's need'} your attention. Replace ${attention === 1 ? 'it' : 'them'} below, then resubmit for verification.`]
-      : ['info', 'upload', 'You replaced a document. Submit again to update your verification before the final decision.'],
-    in_review: ['info', 'shield', 'Your documents are submitted and verified. Our team is reviewing your application.'],
-    approved: ['ok', 'check', 'Your documents have been approved.'],
+      ? ['warn', 'alert', `${duplicate ? `${app.check.reason} ` : ''}${attention} document${attention === 1 ? ' needs' : 's need'} your attention. Replace ${attention === 1 ? 'it' : 'them'} below, then resubmit for verification.`]
+      : mismatch
+        ? ['warn', 'alert', `Mismatch: ${app.check.reason} Your replacement is ready. Submit again for a fresh check.`]
+        : ['info', 'upload', 'You replaced a document. Submit again to update your verification before the final decision.'],
+    in_review: mismatch
+      ? ['warn', 'alert', `Mismatch: ${app.check.reason} Select Edit on your ID card or salary slip below to replace the incorrect file, then resubmit. Staff can also review this result.`]
+      : duplicate
+        ? ['warn', 'alert', app.check.reason]
+      : ['info', 'shield', 'Your documents are submitted and verified. Our team is reviewing your application.'],
+    approved: ['ok', 'check', `Your documents have been approved.${app.check?.reason ? ` ${app.check.reason}` : ''}`],
     rejected: ['bad', 'x', `Your documents were not approved.${app.decision_reason ? ` Reason: ${app.decision_reason}` : ''}`],
   };
   const [tone, glyph, text] = messages[app.status];
@@ -111,7 +119,8 @@ function docCard(app, slot) {
   const attention = d?.status === 'reupload' || slot.missing;
   const buttons = [];
   if (d?.status === 'accepted') buttons.push(`<button class="btn btn-ghost btn-sm" data-view="${slot.slot}" type="button">Preview</button>`);
-  if (slot.can_upload) buttons.push(`<button class="btn btn-outline btn-sm" data-edit="${slot.slot}" type="button" ${busySlot ? 'disabled' : ''}>Edit</button>`);
+  const editLabel = app.check?.status === 'Mismatch' && ['id', 'slip'].includes(slot.slot) ? 'Replace' : 'Edit';
+  if (slot.can_upload) buttons.push(`<button class="btn btn-outline btn-sm" data-edit="${slot.slot}" type="button" ${busySlot ? 'disabled' : ''}>${editLabel}</button>`);
   if (slot.can_remove) buttons.push(`<button class="btn btn-ghost btn-sm danger-text" data-remove="${slot.slot}" type="button" ${busySlot ? 'disabled' : ''}>Cancel</button>`);
   const thumb = d && d.status !== 'accepted'
     ? `<button class="doc-thumb" data-view="${slot.slot}" title="View ${esc(noun(slot.title))}"><img src="/api/borrower/documents/${slot.slot}/preview?size=thumb&v=${d.version}" alt="Preview of your ${esc(noun(slot.title))}" loading="lazy"></button>`

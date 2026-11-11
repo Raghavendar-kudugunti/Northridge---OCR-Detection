@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS documents(
   current INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL, detected_type TEXT, reason TEXT, requested_by INTEGER,
   storage_key TEXT NOT NULL, sha256 TEXT NOT NULL, size INTEGER NOT NULL, kind TEXT NOT NULL, created REAL NOT NULL,
   filename_blob BLOB);
+CREATE TABLE IF NOT EXISTS verified_identity_keys(
+  id INTEGER PRIMARY KEY, key_type TEXT NOT NULL, fingerprint TEXT NOT NULL,
+  application_id INTEGER NOT NULL, borrower_id INTEGER NOT NULL, created REAL NOT NULL,
+  UNIQUE(key_type, fingerprint));
 CREATE TABLE IF NOT EXISTS upload_links(
   token_hash TEXT PRIMARY KEY, application_id INTEGER NOT NULL, slot TEXT NOT NULL, user_id INTEGER NOT NULL,
   expires REAL NOT NULL, used INTEGER NOT NULL DEFAULT 0);
@@ -46,6 +50,7 @@ CREATE TABLE IF NOT EXISTS audit(
 CREATE INDEX IF NOT EXISTS idx_docs_app ON documents(application_id, slot, current);
 CREATE INDEX IF NOT EXISTS idx_app_borrower ON applications(borrower_id);
 CREATE INDEX IF NOT EXISTS idx_audit_app ON audit(application_id, ts);
+CREATE INDEX IF NOT EXISTS idx_verified_identity_owner ON verified_identity_keys(borrower_id, key_type);
 """
 
 
@@ -92,7 +97,9 @@ class Store:
         self.dir = Path(data_dir)
         self.files = self.dir / 'files'
         self.files.mkdir(parents=True, exist_ok=True)
-        self.aead = AESGCM(key or load_key(self.dir))
+        self.key = key or load_key(self.dir)
+        self.aead = AESGCM(self.key)
+        self.identity_key = hmac.new(self.key, b'northbridge-identity-fingerprint-key-v1', hashlib.sha256).digest()
         self.lock = threading.RLock()
         self.db = sqlite3.connect(self.dir / 'northbridge.db', check_same_thread=False, isolation_level=None)
         self.db.row_factory = sqlite3.Row
@@ -124,6 +131,41 @@ class Store:
         if not all(c in '0123456789abcdef' for c in key) or len(key) != 32:
             raise ValueError('bad storage key')
         return self.decrypt((self.files / f'{key}.bin').read_bytes(), f'file:{key}')
+
+    def check_and_register_verified_identity_keys(self, application_id, borrower_id, candidates, register=False):
+        """Compare normalized identity values without storing the values themselves.
+
+        ``candidates`` is an iterable of (kind, normalized_value) pairs. HMACs are keyed
+        with the local encryption key so database-only access does not reveal identifiers.
+        Comparison and optional registration run in one write transaction to avoid races.
+        """
+        fingerprints = set()
+        for kind, value in candidates:
+            if kind and value:
+                material = f'northbridge-identity-v1:{kind}:{value}'.encode('utf-8')
+                fingerprints.add((kind, hmac.new(self.identity_key, material, hashlib.sha256).hexdigest()))
+        if not fingerprints:
+            return []
+        with self.lock:
+            self.db.execute('BEGIN IMMEDIATE')
+            try:
+                matches = []
+                for kind, fingerprint in fingerprints:
+                    row = self.db.execute(
+                        'SELECT 1 FROM verified_identity_keys WHERE key_type=? AND fingerprint=? AND borrower_id<>? LIMIT 1',
+                        (kind, fingerprint, borrower_id)).fetchone()
+                    if row:
+                        matches.append(kind)
+                if register and not matches:
+                    now = time.time()
+                    self.db.executemany(
+                        'INSERT OR IGNORE INTO verified_identity_keys(key_type,fingerprint,application_id,borrower_id,created) VALUES(?,?,?,?,?)',
+                        [(kind, fingerprint, application_id, borrower_id, now) for kind, fingerprint in fingerprints])
+                self.db.commit()
+                return sorted(set(matches))
+            except Exception:
+                self.db.rollback()
+                raise
 
     # ---- queries ----------------------------------------------------------
     def q(self, sql, args=()):
