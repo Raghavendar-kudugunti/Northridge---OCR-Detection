@@ -855,3 +855,30 @@ body::after {
   *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 
+/* Keep the borrower application summary contained and legible at narrow widths. */
+.app-head {
+  align-items: center;
+  gap: 16px 24px;
+  min-width: 0;
+  margin-bottom: 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.app-heading { flex: 1 1 360px; min-width: 0; }
+.app-head h1 {
+  max-width: 100%;
+  font-size: clamp(26px, 3vw, 36px);
+  line-height: 1.12;
+  letter-spacing: -.02em;
+  overflow-wrap: anywhere;
+}
+.app-head p { line-height: 1.45; overflow-wrap: anywhere; }
+.app-statuses { flex: 0 0 auto; max-width: 100%; gap: 16px; border-radius: 12px; }
+.app-statuses > div { min-width: 0; }
+@media (max-width: 760px) {
+  .app-head { align-items: stretch; flex-direction: column; gap: 12px; padding: 16px; }
+  .app-heading { flex-basis: auto; }
+  .app-statuses { align-self: flex-start; }
+}
+

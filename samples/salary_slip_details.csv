@@ -1,0 +1,15 @@
+﻿source_file,employee_name,employee_code,employer,pay_period_start,pay_period_end,payment_date,work_location,currency,gross_salary,basic_pay,house_rent_allowance,other_allowance,income_tax,retirement_contribution,total_deductions,net_pay,synthetic
+synthetic_04_salary_slip_01.pdf,Ravi Menon,HT-2300,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Kochi,INR,48000.00,27800.00,13000.00,7200.00,3400.00,2300.00,5700.00,42300.00,true
+synthetic_09_salary_slip_02.pdf,Meera Iyer,HT-2301,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Pune,INR,51850.00,30100.00,14000.00,7750.00,3600.00,2500.00,6100.00,45750.00,true
+synthetic_14_salary_slip_03.pdf,Kiran Rao,HT-2302,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Mysuru,INR,55700.00,32300.00,15000.00,8400.00,3900.00,2700.00,6600.00,49100.00,true
+synthetic_19_salary_slip_04.pdf,Asha Nair,HT-2303,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Indore,INR,59550.00,34500.00,16100.00,8950.00,4200.00,2900.00,7100.00,52450.00,true
+synthetic_24_salary_slip_05.pdf,Anil Kumar,HT-2304,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Jaipur,INR,63400.00,36800.00,17100.00,9500.00,4400.00,3000.00,7400.00,56000.00,true
+synthetic_29_salary_slip_06.pdf,Leela Shah,HT-2305,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Surat,INR,67250.00,39000.00,18200.00,10050.00,4700.00,3200.00,7900.00,59350.00,true
+synthetic_34_salary_slip_07.pdf,Dev Patel,HT-2306,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Nagpur,INR,71100.00,41200.00,19200.00,10700.00,5000.00,3400.00,8400.00,62700.00,true
+synthetic_39_salary_slip_08.pdf,Nina Das,HT-2307,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Vadodara,INR,74950.00,43500.00,20200.00,11250.00,5200.00,3600.00,8800.00,66150.00,true
+synthetic_44_salary_slip_09.pdf,Arjun Sen,HT-2308,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Coimbatore,INR,78800.00,45700.00,21300.00,11800.00,5500.00,3800.00,9300.00,69500.00,true
+synthetic_49_salary_slip_10.pdf,Maya Roy,HT-2309,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Nashik,INR,82650.00,47900.00,22300.00,12450.00,5800.00,4000.00,9800.00,72850.00,true
+synthetic_54_salary_slip_11.pdf,Kabir Jain,HT-2310,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Bhopal,INR,86500.00,50200.00,23400.00,12900.00,6100.00,4200.00,10300.00,76200.00,true
+synthetic_59_salary_slip_12.pdf,Tara Bose,HT-2311,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Mangaluru,INR,90350.00,52400.00,24400.00,13550.00,6300.00,4300.00,10600.00,79750.00,true
+synthetic_62_salary_slip_variant.pdf,Anil Kumar,HT-2304,Ravi Menon Industries,2026-10-01,2026-10-31,2026-10-31,Jaipur,INR,63400.00,36800.00,17100.00,9500.00,4400.00,3000.00,7400.00,56000.00,true
+synthetic_64_salary_slip_variant.pdf,Kiran Rao,HT-2302,Harbour Tools Pvt Ltd,2026-10-01,2026-10-31,2026-10-31,Mysuru,INR,55700.00,32300.00,15000.00,8400.00,3900.00,2700.00,6600.00,49100.00,true
