@@ -2,6 +2,10 @@
 
 Team Beta · Runnable local MVP + private, browser-only synthetic demonstration.
 
+## Verification workflow
+
+![Northbridge borrower and lender verification workflow](docs/verification-workflow.svg)
+
 ## Local setup and workflow
 
 Python 3.12 is required. The steps below use Windows PowerShell; run them from the repository folder. PyMuPDF reads digital PDF text, Docling handles layout fallback, and RapidOCR processes scans and images. Tesseract is optional.
