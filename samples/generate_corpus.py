@@ -63,19 +63,20 @@ def identity_card(name, i, number):
     page.draw_circle((115, 301), 15, color=(0.38, 0.51, 0.69), fill=(0.38, 0.51, 0.69))
     page.draw_rect((88, 316, 142, 354), color=(0.38, 0.51, 0.69), fill=(0.38, 0.51, 0.69), radius=.5)
     text(page, 78, 385, 'SAMPLE PROFILE', 7, MUTED, True)
-    text(page, 188, 274, 'Full name', 8, MUTED)
+    text(page, 188, 274, 'Employee Name', 8, MUTED)
     text(page, 188, 296, name, 15, NAVY, True)
     text(page, 188, 331, 'Date of birth', 8, MUTED)
     dob = date(1989 + (i % 10), 1 + (i % 12), 8 + (i % 18)).strftime('%d/%m/%Y')
     text(page, 188, 351, dob, 11, INK)
-    text(page, 188, 382, 'ID number', 8, MUTED)
-    text(page, 188, 402, f'TESTA{1000+i:04d}Q', 11, INK, True)
+    employee_id = f'HT-{2300+i:04d}'
+    text(page, 188, 382, 'Employee ID', 8, MUTED)
+    text(page, 188, 402, employee_id, 11, INK, True)
     text(page, 70, 438, 'FICTITIOUS TEST RECORD  •  NO OFFICIAL VALIDITY', 7.5, ORANGE, True)
     box(page, (38, 492, 557, 548), PALE, radius=6)
     text(page, 55, 515, 'Verification note', 8, BLUE, True)
     text(page, 55, 534, 'This sample credential has no real-world identity or legal standing.', 9, INK)
     footer(page, number)
-    data=doc.tobytes(); doc.close(); return data, dob, f'TESTA{1000+i:04d}Q'
+    data=doc.tobytes(); doc.close(); return data, dob, employee_id
 
 
 def aadhaar_sample(name, i, number):
